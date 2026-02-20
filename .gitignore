@@ -1,0 +1,29 @@
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+build/
+dist/
+*.exe
+*.spec
+*.lnk
+
+# OAuth credentials & secrets
+client_secrets.json
+*-oauth2.json
+
+# Generated files
+output_vid.mp4
+temp_note.wav
+frames/
+
+# Media (large files)
+Simulations/
+Songs/
+Sounds/
+Testing/
+notes/
