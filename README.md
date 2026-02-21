@@ -22,15 +22,13 @@ Automatically generates physics-based simulation videos optimized for YouTube Sh
 - **Neon glow effects** on balls and rings (on dark backgrounds)
 - **Particle bursts** on collisions
 - **14 curated color palettes** optimized for phone screens (high contrast, neon-on-dark)
-- **Cinematic vignette** overlay
-- **Screen flash** on climactic moments
 - **Slow-motion endings** for dramatic effect
 
 ## Engagement Features
 
 - **Hook text** in the first 3 seconds (e.g., "How big can it get?", "The walls are closing in...")
-- **Live stat counters** (Size %, Balls count, Bounces, Ring %, Survivors, Time)
 - **CTA text** ("Follow for more!") in the final 2 seconds
+- **Auto-shrinking text** -- hook text automatically scales down to fit the screen width
 - **Escalation pacing** -- gravity increases over time in butterfly effect, bounce limits decrease in countdown
 - **`#Shorts`** auto-appended to descriptions with optimized tags
 
@@ -44,21 +42,19 @@ Automatically generates physics-based simulation videos optimized for YouTube Sh
 
 ```
 pygame==2.5.2
-moviepy==1.0.3
 pillow==10.3.0
 pydub==0.25.1
 numpy==1.26.4
 google-api-python-client==2.134.0
 oauth2client==4.1.3
-imageio==2.34.1
-imageio-ffmpeg==0.5.1
+pyinstaller==6.4.0
 ```
 
 ## Setup
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/Brainrot-Generator.git
+   git clone https://github.com/jstEagle/Brainrot-Shorts-Generator.git
    cd Brainrot-Generator
    ```
 
@@ -71,8 +67,9 @@ imageio-ffmpeg==0.5.1
    ```
 
 3. **Add sound files**
-   - Place `.wav` sound effects in `Sounds/` (at least one file required)
-   - Optionally place `.mp3` songs in `Songs/` for musical simulations
+   - Place sound effects in `Sounds/` (supports `.wav`, `.mp3`, `.ogg`, `.flac`, `.m4a`, `.aac`, `.wma`)
+   - Optionally place songs in `Songs/` (same formats supported) -- they will be automatically cut up into notes and randomly used in videos
+   - Both folders are auto-created on first run if they don't exist
 
 4. **Set up YouTube upload (optional)**
    - Create a project in the [Google Cloud Console](https://console.cloud.google.com/)
@@ -119,25 +116,72 @@ Output videos are saved as `test_<name>.mp4` in the project root (e.g., `test_gr
 
 The `all` command runs every simulation and prints a pass/fail summary at the end -- useful for verifying nothing is broken after making changes.
 
+## Compiling to EXE & Running on Startup
+
+The easiest way to build and set up auto-start is with the compile script:
+
+```bash
+python compile.py
+```
+
+This does two things:
+1. Builds `dist/main.exe` using PyInstaller (via `main.spec`)
+2. Creates a startup shortcut so the generator runs automatically on login
+
+| Platform | Startup method |
+|---|---|
+| **Windows** | Creates a `.lnk` shortcut in the Windows Startup folder (`shell:startup`) |
+| **Mac** | Creates a LaunchAgent plist in `~/Library/LaunchAgents/` |
+
+The shortcut's working directory is set to the project folder so it can find `Songs/`, `Sounds/`, `fonts/`, and `client_secrets.json`.
+
+> **Note:** On Windows, the script will auto-install `winshell` and `pywin32` if they aren't already installed.
+
+### Manual Build (without startup shortcut)
+
+If you only want the exe without the startup shortcut:
+
+```bash
+pyinstaller main.spec --noconfirm
+```
+
+The executable will be at `dist/main.exe`. Make sure `client_secrets.json` is in the project root when running.
+
+## Audio
+
+### Drop-in Sound Effects
+
+Place any audio files in the `Sounds/` folder. A random sound is picked for each collision/bounce event. Supported formats: `.wav`, `.mp3`, `.ogg`, `.flac`, `.m4a`, `.aac`, `.wma`.
+
+### Drop-in Songs
+
+Place any audio files in the `Songs/` folder. Songs are automatically split into individual notes and used as bounce sounds, creating musical simulations. Same formats supported.
+
+### Volume Limiting
+
+All generated audio is automatically limited to -6 dBFS to prevent uncomfortable volume spikes.
+
 ## Project Structure
 
 ```
 Brainrot-Generator/
 ├── main.py                 # Entry point - picks and runs a random simulation
+├── compile.py              # Build script - compiles exe and adds to startup
 ├── test_simulation.py      # Test runner - generate videos without uploading
+├── main.spec               # PyInstaller build specification
 ├── config.py               # Centralized settings (resolution, FPS, timing)
 ├── ball.py                 # Ball physics class (collision, gravity, anti-aliasing)
 ├── ring.py                 # Ring rendering class (anti-aliased)
 ├── pendulum.py             # Pendulum physics class for wave simulation
 ├── palettes.py             # 14 curated color palettes
-├── effects.py              # Glow, particles, screen flash, vignette
+├── effects.py              # Glow, particles (with surface caching)
 ├── text_overlay.py         # PIL-based anti-aliased text with outlines
 ├── hooks.py                # Engagement hook messages and CTA text
 ├── util.py                 # File management, color utilities
-├── simulation_to_mp4.py    # Frame sequence to MP4 conversion
+├── simulation_to_mp4.py    # VideoWriter (FFmpeg pipe) and audio muxing
 ├── upload_video.py         # YouTube API upload
-├── note_play.py            # Audio playback management
-├── notes_extraction.py     # Extract audio segments from songs
+├── note_play.py            # Sound file loading and audio assembly
+├── notes_extraction.py     # Extract note segments from songs
 ├── fonts/
 │   └── Montserrat-Bold.ttf # Bundled font (OFL license)
 ├── Simulations/
@@ -150,9 +194,8 @@ Brainrot-Generator/
 │   ├── gravity_well.py
 │   ├── chain_reaction.py
 │   └── pendulum_wave.py
-├── Songs/                  # MP3 files for musical simulations
-├── Sounds/                 # WAV sound effects
-└── frames/                 # Temporary frame output (auto-cleaned)
+├── Songs/                  # Drop audio files here for musical simulations
+└── Sounds/                 # Drop sound effects here for bounce sounds
 ```
 
 ## Creating a New Simulation
@@ -167,12 +210,12 @@ import ball as b
 import ring as r
 import random
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import ParticleSystem, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from effects import ParticleSystem
+from text_overlay import TextOverlay
 import hooks
 
 def simulation(output_name="final"):
@@ -180,7 +223,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(False)
+    notes_folder, song = util.init_folders(False)
     palette = palettes.get_palette()
     dark_bg = palettes.is_dark_bg(palette)
 
@@ -190,7 +233,9 @@ def simulation(output_name="final"):
     particles = ParticleSystem()
 
     frame_count, max_frames = 0, config.MAX_FRAMES
-    frames, sounds = [], []
+    sounds = []
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while frame_count < max_frames:
         surface.fill(palette['bg'])
@@ -199,67 +244,24 @@ def simulation(output_name="final"):
 
         particles.update()
         particles.draw(surface)
-        draw_vignette(surface)
-        draw_stat(surface, "Your stat here")
 
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
         frame_count += 1
-        frames.append(frame_path)
 
+    writer.close()
     pygame.quit()
+
     # ... title/description generation ...
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description
 ```
 
 Then register it in `main.py` and add hook messages in `hooks.py`.
-
-## Compiling to EXE & Running on Startup
-
-### Step 1: Compile with PyInstaller
-
-```bash
-pyinstaller --onefile ^
-    --add-data "fonts;fonts" ^
-    --add-data "Simulations;Simulations" ^
-    --add-data "Sounds;Sounds" ^
-    --hidden-import=Simulations.growing_sphere ^
-    --hidden-import=Simulations.shrinking_ring ^
-    --hidden-import=Simulations.butterfly_effect ^
-    --hidden-import=Simulations.duplicating_balls ^
-    --hidden-import=Simulations.bounce_countdown ^
-    --hidden-import=Simulations.time_countdown ^
-    --hidden-import=Simulations.gravity_well ^
-    --hidden-import=Simulations.chain_reaction ^
-    --hidden-import=Simulations.pendulum_wave ^
-    --hidden-import=pygame.gfxdraw ^
-    main.py
-```
-
-This creates `dist/main.exe`. Make sure `client_secrets.json` is in the same directory as the exe when running.
-
-### Step 2: Run on Windows Startup
-
-1. Press `Win + R`, type `shell:startup`, press Enter
-2. This opens the Startup folder (`C:\Users\<you>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`)
-3. Create a shortcut to `dist/main.exe` (or copy an existing one) into this folder
-4. The generator will now run automatically every time you log in
-
-Alternatively, use Task Scheduler for more control:
-
-1. Open **Task Scheduler** (`Win + R` -> `taskschd.msc`)
-2. Click **Create Basic Task**
-3. Name: "Brainrot Generator"
-4. Trigger: **When I log on**
-5. Action: **Start a program** -> browse to `dist/main.exe`
-6. Set **Start in** to the directory containing `client_secrets.json` and `Sounds/`
-7. Finish
 
 ## Output Specs
 
@@ -270,7 +272,7 @@ Alternatively, use Task Scheduler for more control:
 | Duration | ~59 seconds |
 | Codec | H.264 (libx264) |
 | Quality | CRF 18, 8000k bitrate |
-| Audio | AAC 192kbps |
+| Audio | AAC 192kbps, limited to -6 dBFS |
 
 ## Font License
 
