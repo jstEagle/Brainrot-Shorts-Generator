@@ -9,7 +9,6 @@ __pycache__/
 build/
 dist/
 *.exe
-*.spec
 *.lnk
 
 # OAuth credentials & secrets
@@ -18,11 +17,13 @@ client_secrets.json
 
 # Generated files
 output_vid.mp4
+test_*.mp4
 temp_note.wav
+simulation.mp4
+output.wav
 frames/
 
-# Media (large files)
-Simulations/
+# Media (large files, user-provided)
 Songs/
 Sounds/
 Testing/

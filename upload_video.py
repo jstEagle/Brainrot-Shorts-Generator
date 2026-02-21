@@ -58,11 +58,16 @@ def get_authenticated_service():
 
 
 def initialize_upload(youtube, file, title, description):
+    # Ensure #Shorts is in the description for YouTube categorization
+    if '#Shorts' not in description:
+        description = description + '\n\n#Shorts #satisfying #physics'
     body = dict(
         snippet=dict(
             title=title,
             description=description,
-            tags=["simulation", "satisfying", "random"],  # You can add tags here if needed
+            tags=["simulation", "satisfying", "physics", "oddlysatisfying", "asmr",
+                  "bouncing ball", "shorts", "mesmerizing", "hypnotic", "random",
+                  "physics simulation", "relaxing", "viral", "trending"],
             categoryId="22"  # Default category
         ),
         status=dict(

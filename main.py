@@ -3,6 +3,9 @@ import Simulations.butterfly_effect as butterfly_effect
 import Simulations.duplicating_balls as duplicating_balls
 import Simulations.shrinking_ring as shrinking_ring
 import Simulations.bounce_countdown as bounce_countdown
+import Simulations.gravity_well as gravity_well
+import Simulations.chain_reaction as chain_reaction
+import Simulations.pendulum_wave as pendulum_wave
 
 import upload_video
 import random
@@ -17,6 +20,12 @@ simulation_functions = [
     shrinking_ring.simulation,
     shrinking_ring.simulation,
     bounce_countdown.simulation,
+    gravity_well.simulation,
+    gravity_well.simulation,
+    chain_reaction.simulation,
+    chain_reaction.simulation,
+    pendulum_wave.simulation,
+    pendulum_wave.simulation,
 ]
 
 flag = False
@@ -27,7 +36,7 @@ description = "simulation"
 
 while not flag:
     flag, title, description = chosen_simulation(file_name)
-    
+
 file_name = f"{file_name}.mp4"
 print()
 print()

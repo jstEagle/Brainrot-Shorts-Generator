@@ -4,6 +4,7 @@ import notes_extraction
 import sys
 import os
 import random
+import palettes
 
 def finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song):
     note_play.create_and_add_sounds_at_times("output.wav", sounds, frame_count)
@@ -65,6 +66,10 @@ def create_background_colour():
     colours = [(light, light, light), (dark, dark, dark)]
     
     return random.choice(colours)
+
+def get_palette():
+    """Get a curated color palette. Wrapper for palettes module."""
+    return palettes.get_palette()
 
 def create_similar_colours(start_colour, num_colours, variance):
     colours = []
