@@ -6,39 +6,43 @@ import os
 import random
 import palettes
 
-def finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song):
+def finish(output_name, sounds, frame_count, video_path, notes_folder, song):
     note_play.create_and_add_sounds_at_times("output.wav", sounds, frame_count)
-    export.export_to_mp4(frames)
-    export.combine_mp4_and_wav("simulation.mp4", "output.wav", f"{output_name}.mp4")
-    clear_folder(frames_folder)
-    if song: clear_folder(notes_folder)
+    export.combine_mp4_and_wav(video_path, "output.wav", f"{output_name}.mp4")
+    if song and notes_folder:
+        clear_folder(notes_folder)
     delete_file("output.wav")
-    delete_file("simulation.mp4")
+    delete_file(video_path)
 
 def loading_bar_frames(frame_count, max_frames):
     progress = int((frame_count / max_frames) * 100)
-    
+
     sys.stdout.write(f"\rFrames Progress: {progress}%")
     sys.stdout.flush()
-    
+
 def loading_bar_sound(count, duration):
     progress = int((count / duration) * 100)
-    
-    sys.stdout.write(f"\rSounds Progress: {progress}%")
-    
-def init_folders(song):
-    if song:
-        files = os.listdir("Songs")
-        song_name = random.choice(files)
-        notes_folder = notes_extraction.extract_notes(song_name)
-        note_play.init()
-    else:
-        files = os.listdir("Sounds")
-        notes_folder = random.choice(files)
-    frames_folder = "frames"
-    os.makedirs(frames_folder, exist_ok=True)
 
-    return notes_folder, frames_folder, song
+    sys.stdout.write(f"\rSounds Progress: {progress}%")
+
+def init_folders(song):
+    os.makedirs("Songs", exist_ok=True)
+    os.makedirs("Sounds", exist_ok=True)
+
+    if song:
+        song_files = [f for f in os.listdir("Songs")
+                      if os.path.splitext(f)[1].lower() in
+                      {'.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.wma'}]
+        if not song_files:
+            # No songs available, fall back to sounds mode
+            song = False
+        else:
+            song_name = random.choice(song_files)
+            notes_folder = notes_extraction.extract_notes(song_name)
+            note_play.init()
+            return notes_folder, song
+
+    return None, song
 
 def clear_folder(folder_path):
     files_in_folder = os.listdir(folder_path)
@@ -64,7 +68,7 @@ def create_background_colour():
     light = random.randint(200, 250)
     dark = random.randint(0, 100)
     colours = [(light, light, light), (dark, dark, dark)]
-    
+
     return random.choice(colours)
 
 def get_palette():

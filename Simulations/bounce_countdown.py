@@ -3,12 +3,12 @@ import ball as b
 import ring as r
 import random
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import ParticleSystem, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from effects import ParticleSystem
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -18,7 +18,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(True)
+    notes_folder, song = util.init_folders(True)
 
     # Use curated palette
     palette = palettes.get_palette()
@@ -74,8 +74,10 @@ def simulation(output_name="final"):
     flag = False
     current_flag = False
     ring_flag = False
-    frames, sounds = [], []
+    sounds = []
     ball_count = 1
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames:
         for event in pygame.event.get():
@@ -99,7 +101,6 @@ def simulation(output_name="final"):
             current_ball = None
             flag = True
             ball_count += 1
-            # Escalation: decrease max_bounces for later balls to speed up fill rate
             if max_bounces > 1 and ball_count % 3 == 0:
                 max_bounces = max(1, max_bounces - 1)
 
@@ -109,7 +110,6 @@ def simulation(output_name="final"):
             ball.draw(surface, glow=dark_bg)
 
         if flag:
-            # Use palette colors for variety
             properties['colour'] = random.choice([palette['primary'], palette['secondary'], palette['accent']])
             current_ball = b.Ball(**properties)
             current_ball.x_vel = random.randint(0, 5)
@@ -117,35 +117,25 @@ def simulation(output_name="final"):
             flag = False
 
         if ring_flag:
-            sounds.append((note_play.get_next_note() if song else note_play.get_sound(notes_folder), frame_count))
+            sounds.append((note_play.get_next_note() if song else note_play.get_sound(), frame_count))
 
         if current_flag:
-            sounds.append((note_play.get_next_note() if song else note_play.get_sound(notes_folder), frame_count))
+            sounds.append((note_play.get_next_note() if song else note_play.get_sound(), frame_count))
 
         # Particles
         particles.update()
         particles.draw(surface)
 
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat counter
-        bounces_left = max_bounces - current_ball.bounces if current_ball else 0
-        draw_stat(surface, f"Bounces: {current_ball.bounces if current_ball else max_bounces}/{max_bounces}")
-
-        # Text overlays
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save the current frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
+    writer.close()
     pygame.quit()
     print()
 
@@ -161,5 +151,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(bounce_similes)} {random.choice(countdown_similes)}"
     description = f"Each ball stops after {initial_max_bounces} bounces!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description

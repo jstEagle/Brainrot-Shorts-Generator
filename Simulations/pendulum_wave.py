@@ -3,13 +3,13 @@ import pygame.gfxdraw
 import random
 import math
 import note_play
-import os
 import util
 import config
 import palettes
+from simulation_to_mp4 import VideoWriter
 from pendulum import Pendulum
-from effects import draw_glow, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from effects import draw_glow
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -19,7 +19,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(False)
+    notes_folder, song = util.init_folders(False)
 
     # Use curated palette (dark bg for best glow look)
     palette = palettes.get_palette()
@@ -33,7 +33,7 @@ def simulation(output_name="final"):
     pivot_y = int(height * 0.15)
     min_length = int(height * 0.2)
     max_length = int(height * 0.55)
-    start_angle = random.uniform(0.4, 0.8)  # release angle in radians
+    start_angle = random.uniform(0.4, 0.8)
 
     # Spread pivots evenly across width
     margin = 80
@@ -42,8 +42,7 @@ def simulation(output_name="final"):
     # Colors: gradient from primary to secondary
     pendulums = []
     for i in range(num_pendulums):
-        t = i / max(1, num_pendulums - 1)  # 0 to 1
-        # Interpolate color from primary to secondary
+        t = i / max(1, num_pendulums - 1)
         c1 = palette['primary']
         c2 = palette['secondary']
         color = (
@@ -52,7 +51,6 @@ def simulation(output_name="final"):
             int(c1[2] + (c2[2] - c1[2]) * t),
         )
         px = int(margin + i * spacing)
-        # Lengths vary slightly so periods differ -> wave patterns
         length = min_length + (max_length - min_length) * (i / max(1, num_pendulums - 1))
         bob_r = random.randint(10, 16)
 
@@ -73,8 +71,10 @@ def simulation(output_name="final"):
     running = True
     frame_count = 0
     max_frames = config.MAX_FRAMES
-    frames, sounds = [], []
+    sounds = []
     sound_cooldown = 0
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames:
         for event in pygame.event.get():
@@ -106,37 +106,26 @@ def simulation(output_name="final"):
         if sound_cooldown <= 0:
             for p in pendulums:
                 if abs(p.angle) < 0.02 and abs(p.angular_vel) > 0.01:
-                    sounds.append((note_play.get_sound(notes_folder), frame_count))
+                    sounds.append((note_play.get_sound(), frame_count))
                     sound_cooldown = 10
                     break
         else:
             sound_cooldown -= 1
 
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat: show elapsed time
-        elapsed_sec = frame_count / config.FPS
-        draw_stat(surface, f"Time: {elapsed_sec:.1f}s")
-
-        # Text overlays
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
+    writer.close()
     pygame.quit()
     print()
 
-    if len(frames) < config.MIN_FRAMES:
-        util.clear_folder(frames_folder)
+    if frame_count < config.MIN_FRAMES:
         return False, "fail", "fail"
 
     title_words = [
@@ -146,5 +135,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(title_words[0])} {random.choice(title_words[1])}"
     description = f"{num_pendulums} pendulums create mesmerizing wave patterns!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description

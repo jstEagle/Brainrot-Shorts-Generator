@@ -4,12 +4,12 @@ import ball as b
 import random
 import math
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import ParticleSystem, draw_glow, draw_screen_flash, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from effects import ParticleSystem, draw_glow
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -24,6 +24,7 @@ class DormantCircle:
         self.activation_timer = 0
         self.expanding = False
         self.expand_r = 0
+        self.neighbors = []  # pre-computed neighbor indices
 
     def activate(self):
         if not self.active:
@@ -41,7 +42,6 @@ class DormantCircle:
     def draw(self, surface, dark_bg=True):
         if self.active:
             if self.expanding:
-                # Glow burst on activation
                 if dark_bg:
                     draw_glow(surface, self.color, (int(self.x), int(self.y)), int(self.expand_r), intensity=6)
             try:
@@ -50,7 +50,6 @@ class DormantCircle:
             except (ValueError, OverflowError):
                 pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), int(self.r))
         else:
-            # Dormant: dim version
             dim = tuple(max(20, c // 4) for c in self.color)
             try:
                 pygame.gfxdraw.aacircle(surface, int(self.x), int(self.y), int(self.r), dim)
@@ -65,7 +64,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(False)
+    notes_folder, song = util.init_folders(False)
 
     # Use curated palette
     palette = palettes.get_palette()
@@ -79,7 +78,7 @@ def simulation(output_name="final"):
     circle_r = random.randint(18, 28)
     spacing = circle_r * 3
     margin_x = 80
-    margin_y = 300  # leave space at top for hook text
+    margin_y = 300
 
     circles = []
     colors = [palette['primary'], palette['secondary'], palette['accent']]
@@ -93,8 +92,17 @@ def simulation(output_name="final"):
             color = random.choice(colors)
             circles.append(DormantCircle(cx, cy, circle_r, color))
 
-    # Activation radius: how close a neighbor must be to activate
     activation_radius = spacing * 1.3
+    activation_radius_sq = activation_radius * activation_radius
+
+    # Pre-compute neighbor lists (distances between circles are static)
+    for i, circle in enumerate(circles):
+        for j, other in enumerate(circles):
+            if i != j:
+                dx = circle.x - other.x
+                dy = circle.y - other.y
+                if dx * dx + dy * dy < activation_radius_sq:
+                    circle.neighbors.append(j)
 
     # Create the trigger ball
     ball_r = random.randint(12, 20)
@@ -122,9 +130,11 @@ def simulation(output_name="final"):
     running = True
     frame_count = 0
     max_frames = config.MAX_FRAMES
-    frames, sounds = [], []
+    sounds = []
     activated_count = 0
     total_circles = len(circles)
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames:
         for event in pygame.event.get():
@@ -137,29 +147,26 @@ def simulation(output_name="final"):
         trigger_ball.update()
         trigger_ball.check_collision_with_border(width, height)
 
-        # Check ball -> dormant circle activation
+        # Check ball -> dormant circle activation (squared-distance)
         for circle in circles:
             if not circle.active:
                 dx = trigger_ball.x - circle.x
                 dy = trigger_ball.y - circle.y
-                dist = math.sqrt(dx * dx + dy * dy)
-                if dist < trigger_ball.r + circle.r:
+                combined_r = trigger_ball.r + circle.r
+                if dx * dx + dy * dy < combined_r * combined_r:
                     circle.activate()
                     activated_count += 1
                     particles.emit(int(circle.x), int(circle.y), circle.color, count=8)
-                    sounds.append((note_play.get_sound(notes_folder), frame_count))
+                    sounds.append((note_play.get_sound(), frame_count))
 
         # Chain reaction: active circles activate dormant neighbors
         newly_activated = []
         for circle in circles:
             if circle.active and circle.activation_timer <= 3:
-                for other in circles:
+                for ni in circle.neighbors:
+                    other = circles[ni]
                     if not other.active:
-                        dx = circle.x - other.x
-                        dy = circle.y - other.y
-                        dist = math.sqrt(dx * dx + dy * dy)
-                        if dist < activation_radius:
-                            newly_activated.append(other)
+                        newly_activated.append(other)
 
         for c in newly_activated:
             if not c.active:
@@ -167,7 +174,7 @@ def simulation(output_name="final"):
                 activated_count += 1
                 particles.emit(int(c.x), int(c.y), c.color, count=6)
                 if random.random() < 0.3:
-                    sounds.append((note_play.get_sound(notes_folder), frame_count))
+                    sounds.append((note_play.get_sound(), frame_count))
 
         # Update circles
         for circle in circles:
@@ -184,33 +191,17 @@ def simulation(output_name="final"):
         particles.update()
         particles.draw(surface)
 
-        # Flash on mass activation
-        if len(newly_activated) > 5:
-            draw_screen_flash(surface, alpha=40)
-
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat
-        pct = int(activated_count / max(1, total_circles) * 100)
-        draw_stat(surface, f"Activated: {pct}%")
-
-        # Text overlays
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
         # End early if all activated + buffer
         if activated_count >= total_circles:
-            # Run for a few more seconds then stop
             end_buffer = 120
             while end_buffer > 0 and frame_count < max_frames:
                 surface.fill(background_colour)
@@ -222,22 +213,18 @@ def simulation(output_name="final"):
                 trigger_ball.draw(surface, glow=True)
                 particles.update()
                 particles.draw(surface)
-                draw_vignette(surface)
-                draw_stat(surface, f"Activated: 100%")
                 text_overlay.draw(surface, frame_count)
-                frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-                pygame.image.save(surface, frame_path)
+                writer.write_frame(surface)
                 util.loading_bar_frames(frame_count, max_frames)
                 frame_count += 1
-                frames.append(frame_path)
                 end_buffer -= 1
             break
 
+    writer.close()
     pygame.quit()
     print()
 
-    if len(frames) < config.MIN_FRAMES:
-        util.clear_folder(frames_folder)
+    if frame_count < config.MIN_FRAMES:
         return False, "fail", "fail"
 
     title_words = [
@@ -247,5 +234,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(title_words[0])} {random.choice(title_words[1])}"
     description = f"One ball triggers a chain reaction across {total_circles} circles!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description

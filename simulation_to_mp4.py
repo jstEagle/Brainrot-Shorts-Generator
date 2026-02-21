@@ -1,37 +1,83 @@
-from moviepy.editor import ImageSequenceClip
-from moviepy.editor import VideoFileClip, AudioFileClip
+import subprocess
+import shutil
 import pygame
 import config
 
-pygame.init()
 
-def export_to_mp4(frames):
-    # Proceed if we have valid frames
-    if frames:
-        try:
-            clip = ImageSequenceClip(frames, fps=config.FPS)
-            # Write the video clip to a file with high quality
-            clip.write_videofile('simulation.mp4',
-                                bitrate=config.VIDEO_BITRATE,
-                                ffmpeg_params=['-crf', config.VIDEO_CRF, '-pix_fmt', 'yuv420p'])
-        except Exception as e:
-            print(f"Error creating video: {e}")
-    else:
-        print("No valid frames available to create video.")
+class VideoWriter:
+    """Pipes raw RGB frames directly to FFmpeg — no intermediate PNGs."""
+
+    def __init__(self, output_path="simulation.mp4", width=None, height=None, fps=None):
+        self.output_path = output_path
+        self.width = width or config.WIDTH
+        self.height = height or config.HEIGHT
+        self.fps = fps or config.FPS
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("ffmpeg not found on PATH")
+
+        self.proc = subprocess.Popen(
+            [
+                ffmpeg,
+                "-y",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "-s", f"{self.width}x{self.height}",
+                "-r", str(self.fps),
+                "-i", "pipe:0",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-crf", config.VIDEO_CRF,
+                "-b:v", config.VIDEO_BITRATE,
+                "-movflags", "+faststart",
+                "-an",
+                self.output_path,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.frame_count = 0
+
+    def write_frame(self, surface):
+        """Write a pygame Surface as one video frame."""
+        raw = pygame.image.tobytes(surface, "RGB")
+        self.proc.stdin.write(raw)
+        self.frame_count += 1
+
+    def close(self):
+        """Finish encoding."""
+        if self.proc.stdin:
+            self.proc.stdin.close()
+        self.proc.wait()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
 
 def combine_mp4_and_wav(video_file, audio_file, output_file):
-    # Load the video file
-    video = VideoFileClip(video_file)
+    """Mux video + audio into final mp4 using FFmpeg directly."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg not found on PATH")
 
-    # Load the audio file
-    audio = AudioFileClip(audio_file)
-
-    # Set the audio of the video to the loaded audio
-    final_video = video.set_audio(audio)
-
-    # Export the final combined video
-    final_video.write_videofile(output_file, codec='libx264', audio_codec='aac',
-                                temp_audiofile='temp-audio.m4a', remove_temp=True,
-                                audio_bitrate='192k',
-                                bitrate=config.VIDEO_BITRATE,
-                                ffmpeg_params=['-crf', config.VIDEO_CRF, '-pix_fmt', 'yuv420p'])
+    subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-i", video_file,
+            "-i", audio_file,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            output_file,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    )

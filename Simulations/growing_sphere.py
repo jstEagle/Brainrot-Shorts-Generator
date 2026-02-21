@@ -3,12 +3,12 @@ import ball as b
 import ring as r
 import random
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import ParticleSystem, draw_screen_flash, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from effects import ParticleSystem
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -18,7 +18,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(random.choice([True, True, True, False]))
+    notes_folder, song = util.init_folders(random.choice([True, True, True, False]))
 
     # Use curated palette
     palette = palettes.get_palette()
@@ -70,9 +70,10 @@ def simulation(output_name="final"):
     check = True
     frame_count, max_frames, end_count = 0, config.MAX_FRAMES, 0
     rate = random.uniform(1.01, 1.06)
-    frames, sounds = [], []
-    flash_timer = 0
+    sounds = []
     climax_frame = -1
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames and end_count < config.END_FRAMES:
         for event in pygame.event.get():
@@ -92,7 +93,7 @@ def simulation(output_name="final"):
         if check:
             if sphere.check_collision_with_ring(ring) and sphere.r <= ring.r:
                 sphere.r *= rate
-                sounds.append((note_play.get_next_note() if song else note_play.get_sound(notes_folder), frame_count))
+                sounds.append((note_play.get_next_note() if song else note_play.get_sound(), frame_count))
                 particles.emit(int(sphere.x), int(sphere.y), sphere.colour, count=10)
             elif sphere.check_collision_with_ring(ring):
                 sphere.trail_frames = []
@@ -102,45 +103,27 @@ def simulation(output_name="final"):
                 sphere.gravity = 0
                 check = False
                 climax_frame = frame_count
-                flash_timer = config.FLASH_FRAMES
         else:
             end_count += 1
-
-        # Screen flash on climax
-        if flash_timer > 0:
-            draw_screen_flash(surface, alpha=config.FLASH_ALPHA)
-            flash_timer -= 1
 
         # Particles
         particles.update()
         particles.draw(surface)
 
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat counter: ball-to-ring size ratio
-        if ring.r > 0:
-            size_pct = int((sphere.r / ring.r) * 100)
-            draw_stat(surface, f"Size: {min(size_pct, 100)}%")
-
-        # Text overlays
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save the current frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
+    writer.close()
     pygame.quit()
     print()
 
-    if len(frames) < config.MIN_FRAMES:
-        util.clear_folder(frames_folder)
+    if frame_count < config.MIN_FRAMES:
         if song:
             util.clear_folder(notes_folder)
             note_play.init()
@@ -158,5 +141,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(growing_similes)} {random.choice(sphere_similes)}"
     description = "The ball grows each time it bounces. Watch to the end!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description

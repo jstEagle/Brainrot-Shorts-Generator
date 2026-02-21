@@ -16,6 +16,11 @@ class Ball:
     efficiency: efficiency of collisions
     friction: friction to be added to velocity each update
     """
+
+    # Class-level scratch surface for fading trail rendering
+    _trail_scratch = None
+    _trail_scratch_size = 0
+
     def __init__(self, colour, x, y, x_vel, y_vel, r, gravity, trail, fading, border, efficiency, friction):
         self.colour = colour
         self.x = x
@@ -77,6 +82,15 @@ class Ball:
         except (ValueError, OverflowError):
             pygame.draw.circle(surface, color, (x, y), r)
 
+    @classmethod
+    def _get_trail_scratch(cls, needed_size):
+        """Get or grow a class-level scratch surface for trail rendering."""
+        if cls._trail_scratch is None or needed_size > cls._trail_scratch_size:
+            cls._trail_scratch_size = needed_size
+            cls._trail_scratch = pygame.Surface((needed_size, needed_size), pygame.SRCALPHA)
+            cls._trail_scratch.fill((0, 0, 0, 0))
+        return cls._trail_scratch
+
     def draw(self, screen, glow=False, glow_color=None):
         """
         draws ball to screen with anti-aliased circles.
@@ -90,16 +104,18 @@ class Ball:
             draw_glow(screen, color, (int(self.x), int(self.y)), int(self.r))
 
         if self.fading:
+            num_trail = len(self.trail_frames)
             for i, frame in enumerate(self.trail_frames):
-                # Create a semi-transparent surface
                 trail_r = int(frame[2])
                 if trail_r < 1:
                     trail_r = 1
-                trail_surface = pygame.Surface((trail_r * 2, trail_r * 2), pygame.SRCALPHA)
-                alpha = int(255 * (i + 1) / len(self.trail_frames))  # Gradual transparency
+                size = trail_r * 2
+                scratch = Ball._get_trail_scratch(size)
+                scratch.fill((0, 0, 0, 0), (0, 0, size, size))
+                alpha = int(255 * (i + 1) / num_trail)
                 trail_colour = (*frame[0], alpha)
-                pygame.draw.circle(trail_surface, trail_colour, (trail_r, trail_r), trail_r)
-                screen.blit(trail_surface, (frame[1][0] - trail_r, frame[1][1] - trail_r))
+                pygame.draw.circle(scratch, trail_colour, (trail_r, trail_r), trail_r)
+                screen.blit(scratch, (frame[1][0] - trail_r, frame[1][1] - trail_r), (0, 0, size, size))
             if self.border:
                 self._draw_aa_circle(screen, (0, 0, 0), (self.x, self.y), self.r + self.border_width)
             self._draw_aa_circle(screen, self.colour, (self.x, self.y), self.r)
@@ -159,63 +175,65 @@ class Ball:
     def check_collision_with_ball(self, ball, static=False):
         dx = ball.x - self.x
         dy = ball.y - self.y
-        distance = math.sqrt(dx**2 + dy**2)
+
+        # Squared-distance early-out
+        combined_r = self.r + ball.r
+        dist_sq = dx * dx + dy * dy
+        if dist_sq >= combined_r * combined_r:
+            return False
+
+        distance = math.sqrt(dist_sq)
 
         # Handling zero distance to prevent division by zero
         if distance == 0:
             distance = 1e-6  # A small value to prevent division by zero
 
-        flag = False
+        # Calculate the normal vector
+        nx = dx / distance
+        ny = dy / distance
 
-        if distance < self.r + ball.r:
-            # Calculate the normal vector
-            nx = dx / distance
-            ny = dy / distance
+        # Calculate the tangent vector
+        tx = -ny
+        ty = nx
 
-            flag = True
+        # Dot product tangent
+        dpTan1 = self.x_vel * tx + self.y_vel * ty
+        dpTan2 = ball.x_vel * tx + ball.y_vel * ty
 
-            # Calculate the tangent vector
-            tx = -ny
-            ty = nx
+        # Dot product normal
+        dpNorm1 = self.x_vel * nx + self.y_vel * ny
+        dpNorm2 = ball.x_vel * nx + ball.y_vel * ny
 
-            # Dot product tangent
-            dpTan1 = self.x_vel * tx + self.y_vel * ty
-            dpTan2 = ball.x_vel * tx + ball.y_vel * ty
+        # Conservation of momentum in 1D
+        m1 = math.pi * self.r**2
+        m2 = math.pi * ball.r**2
 
-            # Dot product normal
-            dpNorm1 = self.x_vel * nx + self.y_vel * ny
-            dpNorm2 = ball.x_vel * nx + ball.y_vel * ny
+        new_dpNorm1 = (dpNorm1 * (m1 - m2) + 2 * m2 * dpNorm2) / (m1 + m2)
+        new_dpNorm2 = (dpNorm2 * (m2 - m1) + 2 * m1 * dpNorm1) / (m1 + m2)
 
-            # Conservation of momentum in 1D
-            m1 = math.pi * self.r**2
-            m2 = math.pi * ball.r**2
+        # Apply efficiency to the normal components
+        new_dpNorm1 *= self.efficiency
+        new_dpNorm2 *= self.efficiency
 
-            new_dpNorm1 = (dpNorm1 * (m1 - m2) + 2 * m2 * dpNorm2) / (m1 + m2)
-            new_dpNorm2 = (dpNorm2 * (m2 - m1) + 2 * m1 * dpNorm1) / (m1 + m2)
+        # Update velocities
+        self.x_vel = tx * dpTan1 + nx * new_dpNorm1
+        self.y_vel = ty * dpTan1 + ny * new_dpNorm1
+        if not static:
+            ball.x_vel = tx * dpTan2 + nx * new_dpNorm2
+            ball.y_vel = ty * dpTan2 + ny * new_dpNorm2
 
-            # Apply efficiency to the normal components
-            new_dpNorm1 *= self.efficiency
-            new_dpNorm2 *= self.efficiency
+        # Prevent overlap
+        overlap = 0.5 * (self.r + ball.r - distance + 1)  # Adjust to prevent sticking
+        self.x -= nx * overlap
+        self.y -= ny * overlap
+        if not static:
+            ball.x += nx * overlap
+            ball.y += ny * overlap
 
-            # Update velocities
-            self.x_vel = tx * dpTan1 + nx * new_dpNorm1
-            self.y_vel = ty * dpTan1 + ny * new_dpNorm1
-            if not static:
-                ball.x_vel = tx * dpTan2 + nx * new_dpNorm2
-                ball.y_vel = ty * dpTan2 + ny * new_dpNorm2
+        self.bounces += 1
+        ball.bounces += 1
 
-            # Prevent overlap
-            overlap = 0.5 * (self.r + ball.r - distance + 1)  # Adjust to prevent sticking
-            self.x -= nx * overlap
-            self.y -= ny * overlap
-            if not static:
-                ball.x += nx * overlap
-                ball.y += ny * overlap
-
-            self.bounces += 1
-            ball.bounces += 1
-
-        return flag
+        return True
 
 
     def check_collision_with_ring(self, ring):

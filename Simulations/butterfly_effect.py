@@ -3,12 +3,11 @@ import ball as b
 import ring as r
 import random
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -18,7 +17,7 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(False)
+    notes_folder, song = util.init_folders(False)
 
     # Use curated palette
     palette = palettes.get_palette()
@@ -57,10 +56,8 @@ def simulation(output_name="final"):
         properties = create_properties()
 
     ball_range = random.randint(10, 50)
-    # Generate colors from palette with variance
     colours = palettes.get_similar_colors(palette['primary'], ball_range, variance=40)
 
-    # Escalation: gradually increase gravity over time
     base_gravity = properties['gravity']
 
     for i in range(ball_range):
@@ -75,7 +72,9 @@ def simulation(output_name="final"):
 
     running = True
     frame_count, max_frames = 0, config.MAX_FRAMES
-    frames, sounds = [], []
+    sounds = []
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames:
         for event in pygame.event.get():
@@ -86,7 +85,6 @@ def simulation(output_name="final"):
 
         ring.draw(surface, glow=dark_bg)
 
-        # Escalation: gradually increase gravity
         gravity_multiplier = 1.0 + (frame_count / max_frames) * 0.5
 
         for ball in balls:
@@ -95,27 +93,18 @@ def simulation(output_name="final"):
             ball.draw(surface, glow=dark_bg)
             flag = ball.check_collision_with_ring(ring)
             if flag:
-                sounds.append((note_play.get_sound(notes_folder), frame_count))
+                sounds.append((note_play.get_sound(), frame_count))
 
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat counter
-        draw_stat(surface, f"Balls: {ball_range}")
-
-        # Text overlays
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save the current frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
+    writer.close()
     pygame.quit()
     print()
 
@@ -131,5 +120,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(butterfly_similes)} {random.choice(effect_similes)}"
     description = f"{ball_range} balls spawn at almost the same point. Watch what happens!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description

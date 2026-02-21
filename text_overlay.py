@@ -3,17 +3,27 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 import config
 
+# ── Caches ────────────────────────────────────────────────────────────────────
+
+_font_cache = {}       # size -> ImageFont
+_stat_cache = {}       # (text, size) -> pygame.Surface
+
 
 def _get_font(size):
-    """Load Montserrat Bold font at given size, fallback to default."""
+    """Load Montserrat Bold font at given size, fallback to default. Cached."""
+    cached = _font_cache.get(size)
+    if cached is not None:
+        return cached
     font_path = config.FONT_PATH
     if os.path.exists(font_path):
-        return ImageFont.truetype(font_path, size)
-    # Fallback to default
-    try:
-        return ImageFont.truetype("arial.ttf", size)
-    except (IOError, OSError):
-        return ImageFont.load_default()
+        font = ImageFont.truetype(font_path, size)
+    else:
+        try:
+            font = ImageFont.truetype("arial.ttf", size)
+        except (IOError, OSError):
+            font = ImageFont.load_default()
+    _font_cache[size] = font
+    return font
 
 
 def render_text(text, size, color=(255, 255, 255), outline_color=(0, 0, 0), outline_width=3):
@@ -56,12 +66,22 @@ class TextOverlay:
         self.overlays = []
 
     def add(self, text, size, position, fade_in_start, fade_in_end, fade_out_start, fade_out_end,
-            color=(255, 255, 255), outline_color=(0, 0, 0), center_x=True):
+            color=(255, 255, 255), outline_color=(0, 0, 0), center_x=True, max_width=None):
         """
         Add a text overlay with timing.
         position: (x, y) - if center_x is True, x is ignored and text is centered.
+        max_width: if set, font size is reduced until the text fits within this width.
         """
-        surface = render_text(text, size, color, outline_color)
+        if max_width is None:
+            max_width = config.WIDTH - 40  # 20px margin each side
+
+        # Shrink font size until text fits within max_width
+        current_size = size
+        surface = render_text(text, current_size, color, outline_color)
+        while surface.get_width() > max_width and current_size > 16:
+            current_size -= 4
+            surface = render_text(text, current_size, color, outline_color)
+
         self.overlays.append({
             'surface': surface,
             'position': position,
@@ -80,7 +100,8 @@ class TextOverlay:
             if alpha <= 0:
                 continue
 
-            surf = overlay['surface'].copy()
+            surf = overlay['surface']
+            # set_alpha is safe on the original — we reset it each frame
             surf.set_alpha(alpha)
 
             x, y = overlay['position']
@@ -106,8 +127,12 @@ class TextOverlay:
 
 
 def draw_stat(screen, text, size=None):
-    """Draw a stat counter in the bottom-left corner."""
+    """Draw a stat counter in the bottom-left corner. Cached per (text, size)."""
     if size is None:
         size = config.FONT_SIZE_SMALL
-    surf = render_text(text, size)
+    key = (text, size)
+    surf = _stat_cache.get(key)
+    if surf is None:
+        surf = render_text(text, size)
+        _stat_cache[key] = surf
     screen.blit(surf, (30, screen.get_height() - surf.get_height() - 30))

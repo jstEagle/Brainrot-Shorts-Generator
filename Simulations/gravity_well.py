@@ -4,12 +4,12 @@ import ball as b
 import random
 import math
 import note_play
-import os
 import util
 import config
 import palettes
-from effects import ParticleSystem, draw_glow, draw_screen_flash, draw_vignette
-from text_overlay import TextOverlay, draw_stat
+from simulation_to_mp4 import VideoWriter
+from effects import ParticleSystem, draw_glow
+from text_overlay import TextOverlay
 import hooks
 
 
@@ -19,12 +19,12 @@ def simulation(output_name="final"):
     width, height = config.WIDTH, config.HEIGHT
     surface = pygame.Surface((width, height))
 
-    notes_folder, frames_folder, song = util.init_folders(False)
+    notes_folder, song = util.init_folders(False)
 
     # Use curated palette
     palette = palettes.get_palette()
     while not palettes.is_dark_bg(palette):
-        palette = palettes.get_palette()  # gravity well looks best on dark bg
+        palette = palettes.get_palette()
 
     background_colour = palette['bg']
     ball_colour = palette['primary']
@@ -49,7 +49,6 @@ def simulation(output_name="final"):
         dist = random.randint(150, 400)
         x = attractor_x + dist * math.cos(angle)
         y = attractor_y + dist * math.sin(angle)
-        # Give tangential velocity for orbit
         speed = random.uniform(3, 7)
         vx = -speed * math.sin(angle) + random.uniform(-0.5, 0.5)
         vy = speed * math.cos(angle) + random.uniform(-0.5, 0.5)
@@ -59,7 +58,7 @@ def simulation(output_name="final"):
             x=x, y=y,
             x_vel=vx, y_vel=vy,
             r=ball_r,
-            gravity=0,  # we handle gravity manually
+            gravity=0,
             trail=random.randint(30, 80),
             fading=True,
             border=False,
@@ -77,8 +76,10 @@ def simulation(output_name="final"):
     running = True
     frame_count = 0
     max_frames = config.MAX_FRAMES
-    frames, sounds = [], []
+    sounds = []
     absorbed_count = 0
+
+    writer = VideoWriter("simulation.mp4", width, height)
 
     while running and frame_count < max_frames and len(balls) > 0:
         for event in pygame.event.get():
@@ -102,17 +103,16 @@ def simulation(output_name="final"):
             ball.update()
             ball.draw(surface, glow=True)
 
-            # Check if absorbed (too close to attractor)
+            # Check if absorbed
             dx = ball.x - attractor_x
             dy = ball.y - attractor_y
             dist = math.sqrt(dx * dx + dy * dy)
             if dist < attractor_r + ball.r * 0.5:
                 to_remove.append(ball)
-                # Attractor grows when absorbing
                 attractor_r += ball.r * 0.4
                 absorbed_count += 1
                 particles.emit(int(ball.x), int(ball.y), ball.colour, count=12)
-                sounds.append((note_play.get_sound(notes_folder), frame_count))
+                sounds.append((note_play.get_sound(), frame_count))
 
             # Keep balls on screen (soft boundary)
             margin = 100
@@ -127,30 +127,16 @@ def simulation(output_name="final"):
         particles.update()
         particles.draw(surface)
 
-        # Screen flash when ball absorbed
-        if to_remove:
-            draw_screen_flash(surface, alpha=60)
-
-        # Vignette
-        draw_vignette(surface)
-
-        # Stat counter
-        draw_stat(surface, f"Survivors: {len(balls)}")
-
-        # Text overlays (hook + CTA)
+        # Text overlays (hook text)
         if frame_count == 0:
             hooks.setup_cta(text_overlay, max_frames, height)
         text_overlay.draw(surface, frame_count)
 
-        # Save frame
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
-
         frame_count += 1
-        frames.append(frame_path)
 
-    # End sequence: show final attractor for a bit
+    # End sequence: show final attractor
     end_count = 0
     while end_count < config.END_FRAMES and frame_count < max_frames:
         surface.fill(background_colour)
@@ -162,22 +148,18 @@ def simulation(output_name="final"):
             pygame.draw.circle(surface, attractor_colour, (attractor_x, attractor_y), int(attractor_r))
         particles.update()
         particles.draw(surface)
-        draw_vignette(surface)
-        draw_stat(surface, f"Absorbed: {absorbed_count}")
         text_overlay.draw(surface, frame_count)
 
-        frame_path = os.path.join(frames_folder, f'frame_{frame_count:04d}.png')
-        pygame.image.save(surface, frame_path)
+        writer.write_frame(surface)
         util.loading_bar_frames(frame_count, max_frames)
         frame_count += 1
-        frames.append(frame_path)
         end_count += 1
 
+    writer.close()
     pygame.quit()
     print()
 
-    if len(frames) < config.MIN_FRAMES:
-        util.clear_folder(frames_folder)
+    if frame_count < config.MIN_FRAMES:
         return False, "fail", "fail"
 
     title_words = [
@@ -187,5 +169,5 @@ def simulation(output_name="final"):
     title = f"{random.choice(title_words[0])} {random.choice(title_words[1])}"
     description = f"A gravity well absorbs orbiting balls. {absorbed_count} were consumed!"
 
-    util.finish(output_name, sounds, frames, frame_count, frames_folder, notes_folder, song)
+    util.finish(output_name, sounds, frame_count, "simulation.mp4", notes_folder, song)
     return True, title, description
